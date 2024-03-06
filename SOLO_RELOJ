@@ -1,0 +1,301 @@
+;*******************************************************************************************************************************************
+; Universidad del Valle de Guatemala
+; IE2023 Programación de Microcontroladores
+; main.asm
+; Proyecto: RELOJ
+; Hardware: ATMEGA328P
+; Created: 2/14/2024 
+; Author : Fatima Urrutia
+;********************************************************************************************************************************************
+
+;********************************************************************************************************************************************
+;ENCABEZADO
+;********************************************************************************************************************************************
+
+.include "M328PDEF.inc"
+
+.cseg
+
+.org 0x00
+	JMP TABLASEG
+.org 0x0008
+	JMP INT_PINC
+.org 0x001A
+	JMP INT_TMR1
+.org 0x0020
+	JMP INT_TMR0
+
+
+;********************************************************************************************************************************************
+;TABLA
+;********************************************************************************************************************************************
+
+TABLASEG: .DB 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F ;, 0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71
+
+;********************************************************************************************************************************************
+;STACK POINTER
+;********************************************************************************************************************************************
+
+Main: 
+	LDI R16, LOW(RAMEND)
+	OUT SPL, R16
+	LDI R17, HIGH(RAMEND)
+	OUT SPH, R17
+
+;********************************************************************************************************************************************
+;SETUP
+;********************************************************************************************************************************************
+
+SETUP:
+	LDI R16, (1 << CLKPCE) ;PRESCALER para 1 MHz
+	STS CLKPR, R16 
+	LDI R16, 0b0000_0100
+	STS CLKPR, R16 ;DIVIDIR LA FRECUENCIA POR 16
+
+	LDI R16, 0b0001_0000 //Configuramos al pueto C como entradas en los primeros 4 bits
+	OUT	DDRC, R16
+
+	LDI R16, 0b0011_1111 //Configuración al puerto C como pull ups
+	OUT PORTC, R16
+	
+	LDI R16, 0b0011_1111	//Configuramos el puerto B como salidas
+	OUT DDRB, R16
+
+	LDI R16, 0b1111_1111	//Configuramos el puerto D como salidas
+	OUT DDRD, R16
+
+;--ACTIVA INTERRUPCIONES-----------------------------------------------------------------------------------------------------------
+
+	LDI R16, (1<<PCIE1)
+	STS PCICR, R16
+
+	LDI R16, (1<<PCINT9) | (1<<PCINT8) | (1<<PCINT10) | (1<<PCINT11)
+	STS PCMSK1, R16
+
+	CALL Timer0
+	CALL Timer1 ; Subrutina timer 0S
+
+	SEI
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)	
+	LPM R23, Z 
+	OUT PORTD, R23 ; segundo Minutos
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	LPM R22, Z
+	OUT PORTD, R22 ; primer Minutos
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	LPM R24, Z
+	OUT PORTD, R24 ; primer hora
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	LPM R17, Z
+	OUT PORTD, R17 ; primer hora
+
+	LDI R18, 0
+	LDI R20, 0x00
+	LDI R21, 0X00
+	LDI R26, 0
+	LDI R27, 0
+	LDI R28, 0
+	LDI R29, 0
+	LDI R30, 0
+
+	
+;********************************************************************************************************************************************
+;CODE
+;********************************************************************************************************************************************
+
+Loop:
+	SBRS R18, 0
+	JMP S0
+	JMP S1
+
+S0:
+	LDI R16, 0b0000_1000
+	OUT PORTB, R16
+	OUT PORTD, R22
+	
+	CALL DEL
+
+	LDI R16, 0b0000_0100
+	OUT PORTB, R16
+	OUT PORTD, R23
+	
+	CALL DEL
+
+	LDI R16, 0b0000_0010
+	OUT PORTB, R16
+	OUT PORTD, R24
+
+	CALL DEL
+
+	LDI R16, 0b000_0001
+	OUT PORTB, R16
+	OUT PORTD, R17
+
+	CALL DEL
+
+	JMP Loop
+
+S1:
+	LDI R16, 0b0000_1000
+	OUT PORTB, R16
+	OUT PORTD, R22
+	
+	CALL DEL
+
+	LDI R16, 0b0000_0100
+	OUT PORTB, R16
+	OUT PORTD, R23
+	
+	CALL DEL
+
+	LDI R16, 0b0000_0010
+	OUT PORTB, R16
+	OUT PORTD, R24
+
+	CALL DEL
+
+	LDI R16, 0b000_0001
+	OUT PORTB, R16
+	OUT PORTD, R17
+	
+	CALL DEL
+	
+	JMP Loop
+
+
+;********************************************************************************************************************************************
+;INTERRUPCIONES
+;********************************************************************************************************************************************
+
+;--PINCHANGE-----------------------------------------------------------------------------------------------------------
+
+INT_PINC:
+	PUSH R16
+	IN R16, SREG
+	PUSH R16
+
+	SBRS R18, 0
+	JMP STATE0
+	JMP STATE1
+
+STATE0:
+	IN R16, PINC
+	SBRC R16, 0
+	JMP SAL
+	LDI R18, 0b0000_0001
+	LDI R16, (0<<TOIE0) 
+	STS TIMSK0, R16
+	JMP SAL
+
+STATE1:
+	IN R16, PINC
+	SBRC R16, 0
+	JMP SET_REL
+	LDI R18, 0b0000_0000
+	CALL Timer0
+	JMP SAL
+
+SET_REL:
+	IN R16, PINC
+	SBRS R16, 1
+	JMP CAMBIA_D
+	SBRS R16, 2
+	JMP INC_REL
+	SBRS R16, 3
+	JMP DEC_REL
+	JMP SAL
+
+CAMBIA_D:
+	
+
+SAL:
+	CBI PCIFR, PCIF1
+	
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI
+
+;--TIMER0--------------------------------------------------------------------------------------------------------------
+
+INT_TMR0:
+	PUSH R16
+	IN R16, SREG
+	PUSH R16
+
+	LDI R16, 159  ; aprox 100ms
+	OUT TCNT0, R16
+
+	INC R20
+	
+	CPI R20, 5
+	BRNE SALIR
+
+DosPuntos:
+	CLR R20
+	
+	SBRC R22, 7
+	JMP Apaga
+	SBR R22, 128
+	SBR R23, 128
+	JMP SALIR
+
+Apaga:
+	CBR R22, 128
+	CBR R23, 128
+		
+SALIR:
+	SBI TIFR0, TOV0
+	
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI
+
+;--TIMER1-----------------------------------------------------------------------------------------------------------
+
+INT_TMR1:
+	PUSH R16
+	IN R16, SREG
+	PUSH R16
+
+	LDI R16, 0x1F  ; aprox 60s
+	STS TCNT1L, R16
+	LDI R16, 0x1B  ; aprox 60s
+	STS TCNT1H, R16
+
+	JMP Minutos
+
+Minutos:
+	CPI R26, 9 ; Verificar si hay overflow
+	BRNE SinOver ; Ir a la subrutina sin overflow
+
+	CPI R27, 5 ; Verificar si hay overflow
+	BREQ Horas ; Ir a la subrutina sin overflow
+
+	INC R27
+	LDI R26, 0
+
+	JMP BAI
+
+SinOver:
+	INC R26
+	JMP BAI
+
+Horas:
+	LDI R26, 0
+	LDI R27, 0
+
+	CPI R28, 9 ; Verificar si hay overflow
+	BREQ Over
+
+	CPI R29, 2
+	BREQ DIA
