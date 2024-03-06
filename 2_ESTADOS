@@ -1,0 +1,534 @@
+;*******************************************************************************************************************************************
+; Universidad del Valle de Guatemala
+; IE2023 Programación de Microcontroladores
+; main.asm
+; Proyecto: RELOJ
+; Hardware: ATMEGA328P
+; Created: 2/14/2024 
+; Author : Fatima Urrutia
+;********************************************************************************************************************************************
+
+;********************************************************************************************************************************************
+;ENCABEZADO
+;********************************************************************************************************************************************
+
+.include "M328PDEF.inc"
+
+.cseg
+
+.org 0x00
+	JMP TABLASEG
+.org 0x0008
+	JMP INT_PINC
+.org 0x001A
+	JMP INT_TMR1
+.org 0x0020
+	JMP INT_TMR0
+
+
+;********************************************************************************************************************************************
+;TABLA
+;********************************************************************************************************************************************
+
+TABLASEG: .DB 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F ;, 0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71
+
+;********************************************************************************************************************************************
+;STACK POINTER
+;********************************************************************************************************************************************
+
+Main: 
+	LDI R16, LOW(RAMEND)
+	OUT SPL, R16
+	LDI R17, HIGH(RAMEND)
+	OUT SPH, R17
+
+;********************************************************************************************************************************************
+;SETUP
+;********************************************************************************************************************************************
+
+SETUP:
+	LDI R16, (1 << CLKPCE) ;PRESCALER para 1 MHz
+	STS CLKPR, R16 
+	LDI R16, 0b0000_0100
+	STS CLKPR, R16 ;DIVIDIR LA FRECUENCIA POR 16
+
+	LDI R16, 0b0001_0000 //Configuramos al pueto C como entradas en los primeros 4 bits
+	OUT	DDRC, R16
+
+	LDI R16, 0b0000_1111 //Configuración al puerto C como pull ups
+	OUT PORTC, R16
+	
+	LDI R16, 0b0011_1111	//Configuramos el puerto B como salidas
+	OUT DDRB, R16
+
+	LDI R16, 0b1111_1111	//Configuramos el puerto D como salidas
+	OUT DDRD, R16
+
+;--ACTIVA INTERRUPCIONES-----------------------------------------------------------------------------------------------------------
+
+	LDI R16, (1<<PCIE1)
+	STS PCICR, R16
+
+	LDI R16, (1<<PCINT9) | (1<<PCINT8) | (1<<PCINT10) | (1<<PCINT11)
+	STS PCMSK1, R16
+
+	CALL Timer0
+	CALL Timer1 ; Subrutina timer 0S
+
+	SEI
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)	
+	LPM R23, Z 
+	OUT PORTD, R23 ; segundo Minutos
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	LPM R22, Z
+	OUT PORTD, R22 ; primer Minutos
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	LPM R24, Z
+	OUT PORTD, R24 ; primer hora
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	LPM R17, Z
+	OUT PORTD, R17 ; primer hora
+
+	LDI R18, 0
+	LDI R19, 0
+	LDI R20, 0x00
+	LDI R21, 0X00
+	LDI R26, 0
+	LDI R27, 0
+	LDI R28, 0
+	LDI R29, 0
+	LDI R30, 0
+
+	
+;********************************************************************************************************************************************
+;CODE
+;********************************************************************************************************************************************
+
+Loop:
+	SBRS R18, 0
+	JMP S0
+	JMP S1
+
+S0:
+	CBI PORTB, PB0
+	SBI PORTB, PB3
+	OUT PORTD, R22
+	
+	CALL DEL
+
+	CBI PORTB, PB3
+	SBI PORTB, PB2
+	OUT PORTD, R23
+	
+	CALL DEL
+
+	CBI PORTB, PB2
+	SBI PORTB, PB1
+	OUT PORTD, R24
+
+	CALL DEL
+
+	CBI PORTB, PB1
+	SBI PORTB, PB0
+	OUT PORTD, R17
+	
+	CALL DEL
+	
+	JMP Loop
+
+S1:
+	CBI PORTB, PB0
+	SBI PORTB, PB3
+	OUT PORTD, R22
+	
+	CALL DEL
+
+	CBI PORTB, PB3
+	SBI PORTB, PB2
+	OUT PORTD, R23
+	
+	CALL DEL
+
+	CBI PORTB, PB2
+	SBI PORTB, PB1
+	OUT PORTD, R24
+
+	CALL DEL
+
+	CBI PORTB, PB1
+	SBI PORTB, PB0
+	OUT PORTD, R17
+	
+	CALL DEL
+	
+	JMP Loop
+
+
+;********************************************************************************************************************************************
+;INTERRUPCIONES
+;********************************************************************************************************************************************
+
+;--PINCHANGE-----------------------------------------------------------------------------------------------------------
+
+INT_PINC:
+	PUSH R16
+	IN R16, SREG
+	PUSH R16
+
+	SBRS R18, 0
+	JMP STATE0
+	JMP STATE1
+
+STATE0:
+	IN R16, PINC
+	SBRC R16, 0
+	JMP SAL
+	LDI R18, 0b0000_0001
+	LDI R16, (0<<TOIE0) 
+	STS TIMSK0, R16
+	SBI PORTB, PD4
+	JMP SAL
+
+STATE1:
+	IN R16, PINC
+	SBRC R16, 0
+	JMP SET_REL
+	LDI R18, 0b0000_0000
+	CALL Timer0
+	CBI PORTB, PD4
+	LDI R19, 0
+	JMP SAL
+
+SET_REL:
+	IN R16, PINC
+	SBRS R16, 1
+	JMP CAMBIA_D
+	SBRS R16, 2
+	JMP INC_REL
+	SBRS R16, 3
+	JMP DEC_REL
+	JMP SAL
+
+CAMBIA_D:
+	CPI R19, 0b0000_0010
+	BREQ OVERD
+	INC R19
+	JMP SAL
+	
+OVERD:
+	LDI R19, 0
+	JMP SAL
+
+INC_REL:
+	CPI R19, 0b0000_0000
+	BREQ ID1
+	CPI R19, 0b0000_0001
+	BREQ ID2
+	CPI R19, 0b0000_0010
+	BREQ ID3
+	JMP SAL
+
+ID1:
+	CPI R26, 9
+	BREQ OD1
+	INC R26
+	JMP SAL	
+
+OD1:
+	LDI R26, 0
+	JMP SAL
+
+ID2:
+	CPI R27, 5
+	BREQ OD2
+	INC R27
+	JMP SAL
+
+OD2:
+	LDI R27, 0
+	JMP SAL
+
+ID3:
+	CPI R29, 2
+	BREQ CD3
+	CPI R28, 9
+	BREQ OD3
+	INC R28
+	JMP SAL
+
+CD3:
+	CPI R28, 3
+	BREQ OOD3
+	INC R28
+	JMP SAL
+
+OD3:
+	LDI R28, 0
+	INC R29
+	JMP SAL
+
+oOD3:
+	LDI R28, 0
+	LDI R29, 0
+	JMP SAL
+
+DEC_REL:
+	CPI R19, 0b0000_0000
+	BREQ DD1
+	CPI R19, 0b0000_0001
+	BREQ DD2
+	CPI R19, 0b0000_0010
+	BREQ DD3
+	JMP SAL
+
+DD1:
+	CPI R26, 0
+	BREQ UD1
+	DEC R26
+	JMP SAL	
+
+UD1:
+	LDI R26, 9
+	JMP SAL
+
+DD2:
+	CPI R27, 0
+	BREQ UD2
+	DEC R27
+	JMP SAL
+
+UD2:
+	LDI R27, 5
+	JMP SAL
+
+DD3:
+	CPI R29, 2
+	BREQ SD3
+	CPI R29, 1
+	BREQ SD3
+	CPI R28, 0
+	BREQ UDD3
+	DEC R28
+	JMP SAL
+
+SD3:
+	CPI R28, 0
+	BREQ UD3
+	DEC R28
+	JMP SAL
+
+UD3:
+	LDI R28, 9
+	DEC R29
+	JMP SAL
+
+UDD3:
+	LDI R28, 4
+	LDI R29, 2
+	JMP SAL
+
+SAL:
+	SBI PCIFR, PCIF1
+	
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R26 ; Regresar el puntero a la posicion cero
+	LPM R22, Z ; cargar el valor de la tabla
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R23, Z ; cargar el valor de la tablaa
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R28 ; Regresar el puntero a la posicion cero
+	LPM R24, Z ; cargar el valor de la tabla
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R29 ; Regresar el puntero a la posicion cero
+	LPM R17, Z ; cargar el valor de la tablaa
+
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI
+
+;--TIMER0--------------------------------------------------------------------------------------------------------------
+
+INT_TMR0:
+	PUSH R16
+	IN R16, SREG
+	PUSH R16
+
+	LDI R16, 159  ; aprox 100ms
+	OUT TCNT0, R16
+
+	INC R20
+	
+	CPI R20, 5
+	BRNE SALIR
+
+DosPuntos:
+	CLR R20
+	
+	SBRC R22, 7
+	JMP Apaga
+	SBR R22, 128
+	SBR R23, 128
+	JMP SALIR
+
+Apaga:
+	CBR R22, 128
+	CBR R23, 128
+		
+SALIR:
+	SBI TIFR0, TOV0
+	
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI
+
+;--TIMER1-----------------------------------------------------------------------------------------------------------
+
+INT_TMR1:
+	PUSH R16
+	IN R16, SREG
+	PUSH R16
+
+	LDI R16, 0x1F  ; aprox 60s
+	STS TCNT1L, R16
+	LDI R16, 0x1B  ; aprox 60s
+	STS TCNT1H, R16
+
+	JMP Minutos
+
+Minutos:
+	CPI R26, 9 ; Verificar si hay overflow
+	BRNE SinOver ; Ir a la subrutina sin overflow
+
+	CPI R27, 5 ; Verificar si hay overflow
+	BREQ Horas ; Ir a la subrutina sin overflow
+
+	INC R27
+	LDI R26, 0
+
+	JMP BAI
+
+SinOver:
+	INC R26
+	JMP BAI
+
+Horas:
+	LDI R26, 0
+	LDI R27, 0
+
+	CPI R28, 9 ; Verificar si hay overflow
+	BREQ Over
+
+	CPI R29, 2
+	BREQ DIA
+
+	INC R28
+	JMP BAI
+
+DIA:
+	CPI R28, 3 ; Verificar si hay overflow
+	BREQ RSTC
+
+	INC R28
+
+	JMP BAI
+
+RSTC:
+	LDI R26, 0
+	LDI R27, 0
+	LDI R28, 0
+	LDI R29, 0
+	JMP BAI
+
+Over:
+	INC R29
+	LDI R28, 0
+	JMP BAI
+	
+BAI:		
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R26 ; Regresar el puntero a la posicion cero
+	LPM R22, Z ; cargar el valor de la tabla
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R23, Z ; cargar el valor de la tablaa
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R28 ; Regresar el puntero a la posicion cero
+	LPM R24, Z ; cargar el valor de la tabla
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R29 ; Regresar el puntero a la posicion cero
+	LPM R17, Z ; cargar el valor de la tablaa
+
+	LDI R16, 0x1F  ; aprox 10ms
+	STS TCNT1L, R16
+	LDI R16, 0x1B  ; aprox 10ms
+	STS TCNT1H, R16		;cargar 15 ms
+
+	SBI TIFR1, TOV1		;Limpiar bandera 
+	
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI
+
+;********************************************************************************************************************************************
+;SUBRUTINAS
+;********************************************************************************************************************************************	
+
+Timer0:
+	LDI R16, (1 << CS02) | (1 << CS00) ; Prescaler 1024
+	OUT TCCR0B, R16
+
+	LDI R16, 159  ; aprox 100ms
+	OUT TCNT0, R16
+
+	LDI R16, (1<<TOIE0)
+	STS TIMSK0, R16
+
+	RET
+
+Timer1:
+	LDI R16, (1 << CS12) | (1 << CS10) ; Prescaler 1024
+	STS TCCR1B, R16
+
+	LDI R16, 0x1F  ; aprox 60s
+	STS TCNT1L, R16
+	LDI R16, 0x1B  ; aprox 60s
+	STS TCNT1H, R16
+
+	LDI R16, (1<<TOIE1)
+	STS TIMSK1, R16
+
+	RET
+
+DEL:
+	LDI R16, 100
+
+LOOP_DELAY:
+	DEC R16
+	BRNE LOOP_DELAY
+	RET
