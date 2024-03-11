@@ -1,0 +1,59 @@
+Septiembre:
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 0
+	BREQ Octubre ;Verificar si estamos en octubre segun unidades
+
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3 ;Saltar a nuevo mes para noviembre
+	BREQ NMS
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 9
+	BREQ OP ;Saltar a Overflow parcial para noviembre
+	JMP INCN
+
+Noviembre:
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 0
+	BREQ Octubre ;Verificar si estamos en octubre segun unidades
+
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3 ;Saltar a nuevo mes para noviembre
+	BREQ NNM
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 9
+	BREQ OP ;Saltar a Overflow parcial para noviembre
+	JMP INCN
+
+Octubre:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3
+	BREQ ODO ;Saltar a overflow definitivo para 31 dias
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 9
+	BREQ OP ;Saltar a overflow parcial para octubre
+	JMP INCN
+
+ODO:
+	MOV R27, R24 ; 
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ NNM ;Terminar overflow definitivo para octubre
+
+	INC R27 ;Incrementar unidad de dia
+	CBR R24, 0x0F
+	OR R24, R27
+	JMP BAI
