@@ -1,59 +1,137 @@
-Septiembre:
-	MOV R27, R23
-	CBR R27, 0xF0
-	CPI R27, 0
-	BREQ Octubre ;Verificar si estamos en octubre segun unidades
-
-	MOV R27, R24
-	SWAP R27
-	CBR R27, 0xF0
-	CPI R27, 3 ;Saltar a nuevo mes para noviembre
-	BREQ NMS
-
-	MOV R27, R24
-	CBR R27, 0xF0
-	CPI R27, 9
-	BREQ OP ;Saltar a Overflow parcial para noviembre
-	JMP INCN
-
-Noviembre:
-	MOV R27, R23
-	CBR R27, 0xF0
-	CPI R27, 0
-	BREQ Octubre ;Verificar si estamos en octubre segun unidades
-
-	MOV R27, R24
-	SWAP R27
-	CBR R27, 0xF0
-	CPI R27, 3 ;Saltar a nuevo mes para noviembre
-	BREQ NNM
-
-	MOV R27, R24
-	CBR R27, 0xF0
-	CPI R27, 9
-	BREQ OP ;Saltar a Overflow parcial para noviembre
-	JMP INCN
-
-Octubre:
-	MOV R27, R24
-	SWAP R27
-	CBR R27, 0xF0
-	CPI R27, 3
-	BREQ ODO ;Saltar a overflow definitivo para 31 dias
-
-	MOV R27, R24
-	CBR R27, 0xF0
-	CPI R27, 9
-	BREQ OP ;Saltar a overflow parcial para octubre
-	JMP INCN
-
-ODO:
-	MOV R27, R24 ; 
-	CBR R27, 0xF0
-	CPI R27, 1
-	BREQ NNM ;Terminar overflow definitivo para octubre
-
-	INC R27 ;Incrementar unidad de dia
-	CBR R24, 0x0F
-	OR R24, R27
+ALARMA:
+	MOV R27, R28
+	MOV R16, R21
+	CPSE R27, R16
 	JMP BAI
+	MOV R27, R29
+	MOV R16, R22
+	CP R27, R26
+	BREQ BAIA
+
+
+BAI:
+	IN R27, PINC
+	SBRC R27, 4
+	CBI PORTC, PC4
+	JMP BBAI
+
+BAIA:
+	IN R27, PINC
+	SBRS R27, 4
+	SBI PORTC, PC4
+	JMP BBAI
+
+BBAI:
+	CPI R25, 0b0000_0000
+	BREQ BAIH ;Actualizar los valores de la hora
+	CPI R25, 0b0000_0001
+	BREQ BAIF ;Actualizar los valores de la fecha
+	CPI R25, 0b0000_0100
+	BREQ BAI_A
+
+BAIF:
+	MOV R27, R23
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R17, Z ; cargar el valor de la tabla
+
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R18, Z ; cargar el valor de la tablaa
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R19, Z ; cargar el valor de la tabla
+
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R20, Z ; cargar el valor de la tablaa
+		
+	SBI TIFR1, TOV1		;Limpiar bandera 
+	
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI
+	
+BAIH:	
+	MOV R27, R21
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R17, Z ; cargar el valor de la tabla
+
+	MOV R27, R21
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R18, Z ; cargar el valor de la tablaa
+
+	MOV R27, R22
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R19, Z ; cargar el valor de la tabla
+		
+	SBI TIFR1, TOV1		;Limpiar bandera 
+	
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI
+
+BAI_A:
+	MOV R27, R28
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R17, Z ; cargar el valor de la tabla
+
+	MOV R27, R28
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R18, Z ; cargar el valor de la tablaa
+
+	MOV R27, R29
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R19, Z ; cargar el valor de la tabla
+
+	MOV R27, R29
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R20, Z ; cargar el valor de la tablaa
+
+
+	SBI TIFR1, TOV1		;Limpiar bandera 
+
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI	
