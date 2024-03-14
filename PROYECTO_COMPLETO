@@ -1,0 +1,1720 @@
+;*******************************************************************************************************************************************
+; Universidad del Valle de Guatemala
+; IE2023 Programación de Microcontroladores
+; main.asm
+; Proyecto: RELOJ
+; Hardware: ATMEGA328P
+; Created: 2/14/2024 
+; Author : Fatima Urrutia
+;********************************************************************************************************************************************
+
+;********************************************************************************************************************************************
+;ENCABEZADO
+;********************************************************************************************************************************************
+
+.include "M328PDEF.inc"
+
+.cseg
+
+.org 0x00
+	JMP TABLASEG ; Main Code
+.org 0x0008
+	JMP INT_PINC ; Interrupcion PINC
+.org 0x001A
+	JMP INT_TMR1 ; Interrupcion Timer 1
+.org 0x0020
+	JMP INT_TMR0 ; Interrupcion Timer 0
+
+
+;********************************************************************************************************************************************
+;TABLA
+;********************************************************************************************************************************************
+
+TABLASEG: .DB 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F ; Tabla de 1-9 para display
+
+;********************************************************************************************************************************************
+;STACK POINTER
+;********************************************************************************************************************************************
+
+Main: 
+	LDI R16, LOW(RAMEND)
+	OUT SPL, R16
+	LDI R19, HIGH(RAMEND)
+	OUT SPH, R19
+
+;********************************************************************************************************************************************
+;SETUP
+;********************************************************************************************************************************************
+
+SETUP:
+	LDI R16, (1 << CLKPCE) ; Activar prescaler
+	STS CLKPR, R16 
+	LDI R16, 0b0000_0101
+	STS CLKPR, R16 ; DIVIDIR LA FRECUENCIA POR 32
+
+	LDI R16, 0b0001_0000 //Configuramos al pueto C como entradas en los primeros 4 bits
+	OUT	DDRC, R16
+
+	LDI R16, 0b0000_1111 //Configuración al puerto C como pull ups
+	OUT PORTC, R16
+	
+	LDI R16, 0b0011_1111	//Configuramos el puerto B como salidas
+	OUT DDRB, R16
+
+	LDI R16, 0b1111_1111	//Configuramos el puerto D como salidas
+	OUT DDRD, R16
+
+;--ACTIVA INTERRUPCIONES-----------------------------------------------------------------------------------------------------------
+
+	LDI R16, (1<<PCIE1) ; Activar mascara de  interrupcion
+	STS PCICR, R16
+
+	LDI R16, (1<<PCINT9) | (1<<PCINT8) | (1<<PCINT10) | (1<<PCINT11) ; configurar el control de los registros
+	STS PCMSK1, R16
+
+	CALL Timer0 ; Configurar timer 0
+	CALL Timer1 ; Configurar timer 1
+
+	SEI
+
+	LDI R17, 0
+	LDI R18, 0
+	LDI R19, 0
+	LDI R20, 0
+	LDI R21, 0
+	LDI R22, 0
+	LDI R23, 0X01
+	LDI R24, 0X01 ;Iniciar en 1 de enero
+	LDI R25, 0
+	LDI R26, 0
+	LDI R27, 0
+	LDI R28, 0
+	LDI R29, 0x24 ;iniciar alarma apagada
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)	
+	LPM R17, Z 
+	OUT PORTD, R17 ; Display 1 en 0 para minutos
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	LPM R18, Z
+	OUT PORTD, R18 ; Display 2 en 0 para minutos
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	LPM R19, Z
+	OUT PORTD, R19 ; Display 3 en 0 para horas
+
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	LPM R20, Z
+	OUT PORTD, R20 ; Display 4 en 0 para horas
+	
+;********************************************************************************************************************************************
+;CODE
+;********************************************************************************************************************************************
+
+Loop:
+	CBI PORTB, PB0 
+	SBI PORTB, PB3 ;Encender el transistor del DP1
+	OUT PORTD, R17 ;Actualizar valor de la tabla de DP1
+	
+	CALL DEL
+
+	CBI PORTB, PB3
+	SBI PORTB, PB2 ;Encender el transistor del DP2
+	OUT PORTD, R18 ;Actualizar valor de la tabla de DP2
+	
+	CALL DEL
+
+	CBI PORTB, PB2
+	SBI PORTB, PB1 ;Encender el transistor del DP3
+	OUT PORTD, R19 ;Actualizar valor de la tabla de DP3
+
+	CALL DEL
+
+	CBI PORTB, PB1
+	SBI PORTB, PB0 ;Encender el transistor del DP4
+	OUT PORTD, R20 ;Actualizar valor de la tabla de DP4
+	
+	CALL DEL
+	
+	JMP Loop
+
+
+;********************************************************************************************************************************************
+;INTERRUPCIONES
+;********************************************************************************************************************************************
+
+;--PINCHANGE-----------------------------------------------------------------------------------------------------------
+
+INT_PINC:
+	PUSH R16
+	IN R16, SREG
+	PUSH R16
+
+	IN R27, PINC
+	SBRC R27, 4
+	JMP OFFALARM
+
+	CPI R25, 0b0000_0000 ; Verificar en que estado estamos
+	BREQ STATE0
+	CPI R25, 0b0000_0001
+	BREQ STATE1
+	CPI R25, 0b0000_0010
+	BREQ STATE2
+	CPI R25, 0b0000_0011
+	BREQ STATE3
+	CPI R25, 0b0000_0100
+	BREQ STATE4
+
+
+STATE0:
+	IN R16, PINC
+	SBRC R16, 0 ; Saltar la siguiente instruccion si se presiono el boton de modo
+	JMP SAL
+	INC R25 ; Incrementar la variable de estado
+	LDI R16, (0<<TOIE0)
+	STS TIMSK0, R16
+	JMP SAL
+
+STATE1:
+	IN R16, PINC
+	SBRC R16, 0 ; Saltar la siguiente instruccion si se presiono el boton de modo
+	JMP SAL
+	INC R25 ; Incrementar la variable de estado
+	SBI PORTB, PD4 ; Encender LED de configuracion de hora
+
+	LDI R16, (0<<TOIE1)
+	STS TIMSK1, R16
+
+	JMP SAL
+
+
+STATE2:
+	IN R16, PINC
+	SBRC R16, 0 ; Saltar la siguiente instruccion si se presiono el boton de modo
+	JMP SET_REL
+	INC R25 ; Incrementar estado
+	CBI PORTB, PB4 ; Apagar LED de configuracion de hora
+	SBI PORTB, PB5 ; Encencer LED de configuracion de fecha
+	LDI R26, 0 ; Resetear numero de display en configuracion
+	JMP SAL
+
+STATE3:
+	IN R16, PINC
+	SBRC R16, 0 ; Saltar la siguiente instruccion si se presiono el boton de modo
+	JMP SET_FECHA
+	INC R25
+	Call Timer1
+	SBI PORTB, PB4 ; Encender LED de configuracion de hora
+	LDI R26, 0 ; Resetear numero de display en configuracion
+	JMP SAL
+
+STATE4:
+	IN R16, PINC
+	SBRC R16, 0 ; Saltar la siguiente instruccion si se presiono el boton de modo
+	JMP SET_ALARM
+	CLR R25
+	CALL Timer0
+	CBI PORTB, PB5 ; Apagar LED de configuracion de fecha
+	CBI PORTB, PB4 ; Apagar LED de configuracion de hora
+	LDI R26, 0 ; Resetear numero de display en configuracion
+	JMP SAL
+
+SET_REL: 
+	IN R16, PINC ;ver si incrementamos, decrementamos o cambiamos de display
+	SBRS R16, 1
+	JMP CAMBIA_D
+	SBRS R16, 2
+	JMP INC_REL
+	SBRS R16, 3
+	JMP DEC_REL
+	JMP SAL
+
+CAMBIA_D:
+	CPI R26, 0b0000_0010 ;cambiar el display a modificar
+	BREQ OVERD
+	INC R26
+	JMP SAL
+	
+OVERD:
+	LDI R26, 0  ;regresar al primer display
+	JMP SAL
+
+INC_REL:
+	CPI R26, 0b0000_0000 ; verificar que display estamos editando
+	BREQ ID1
+	CPI R26, 0b0000_0001
+	BREQ ID2
+	CPI R26, 0b0000_0010
+	BREQ ID3
+	JMP SAL
+
+ID1:
+	MOV R27, R21
+	CBR R27, 0xF0
+	CPI R27, 9 ;verificar si la unidad de minuto llego a 9
+	BREQ OD1 ; Ir a overflow de la unidad de minuto 1
+	INC R27
+	CBR R21, 0x0F
+	OR R21, R27
+	JMP SAL	
+
+OD1:
+	CBR R21, 0x0F ; setearla unidad de minuto en cero
+	JMP SAL
+
+
+ID2:
+	MOV R27, R21 ;Verificar si la decena de minuto llego a 5
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 5
+	BREQ OD2 ;Ir a overflow de decenas de minuto
+	INC R27
+	SWAP R27
+	CBR R21, 0xF0
+	OR R21, R27
+	JMP SAL
+
+OD2:
+	CBR R21, 0xF0
+	JMP SAL
+
+ID3:
+	MOV R27, R22
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 2 ;Verificar si la decena de horas llego a 2
+	BREQ CD3 ;Saltar a cuidado con llegar a 3 en las unidades
+	MOV R27, R22
+	CBR R27, 0xF0
+	CPI R27, 9 ;Verificar si la unidad de horas llego a 9
+	BREQ OD3 ;Ir a overflow antes del 20
+	INC R27
+	CBR R22, 0x0F
+	OR R22, R27
+	JMP SAL
+
+CD3:
+	MOV R27, R22
+	CBR R27, 0xF0
+	CPI R27, 3 ;Verificar si la unidad de horas es 3
+	BREQ OOD3 ;Saltar a overflow de horas
+	INC R27
+	CBR R22, 0x0F
+	OR R22, R27
+	JMP SAL
+
+OD3:
+	CBR R22, 0x0F ;Poner unidades de hora en cero
+	MOV R27, R22 ;Incrementar decenas de hora en
+	SWAP R27
+	INC R27
+	SWAP R27
+	CBR R22, 0xF0
+	OR R22, R27
+	JMP SAL
+
+OOD3:
+	CLR R22 ;Poner horas en cero
+	JMP SAL
+
+DEC_REL:
+	CPI R26, 0b0000_0000 ; verificar que display estamos editando
+	BREQ DD1
+	CPI R26, 0b0000_0001
+	BREQ DD2
+	CPI R26, 0b0000_0010
+	BREQ DD3
+	JMP SAL
+
+DD1:
+	MOV R27, R21
+	CBR R27, 0XF0
+	CPI R27, 0 ;comparar unidades de minuto con cero
+	BREQ UD1 ;Ir a underflow de unidades de minuto
+	DEC R27
+	CBR R21, 0x0F
+	OR R21, R27
+	JMP SAL	
+
+UD1:
+	LDI R27, 9 ;Poner unidades de minuto en 9
+	CBR R21, 0x0F
+	OR R21, R27
+	JMP SAL
+
+DD2:
+	MOV R27, R21
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 0 ;Comparar decenas de minuto con 0
+	BREQ UD2 ;Underflow de decenas de minuto
+	DEC R27
+	SWAP R27
+	CBR R21, 0xF0
+	OR R21, R27
+	JMP SAL
+
+UD2:
+	LDI R27, 5 ; poner decenas de minuto en 5
+	SWAP R27
+	CBR R21, 0xF0
+	OR R21, R27
+	JMP SAL
+
+DD3:
+	MOV R27, R22 
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 0 ;Verificar si la decena de hora es 0
+	BREQ SD3 ;Saltar a cuidado con underflow total
+	MOV R27, R22
+	CBR R27, 0xF0
+	CPI R27, 0 ;Verificar si la unidad de hora es 0
+	BREQ UD3 ;Saltar a underflow parcial
+	DEC R27
+	CBR R22, 0x0F
+	OR R22, R27
+	JMP SAL
+
+SD3:
+	MOV R27, R22
+	CBR R27, 0xF0
+	CPI R27, 0 ;Verificar si la unidad de hora es cero
+	BREQ UDD3 ;ir a underflow total
+	DEC R27
+	CBR R22, 0x0F
+	OR R22, R27
+	JMP SAL
+
+UD3:
+	LDI R27, 9
+	CBR R22, 0x0F
+	OR R22, R27 ;Poner unidades de hora en 9
+	MOV R27, R22
+	CBR R27, 0x0F
+	SWAP R27
+	DEC R27
+	SWAP R27
+	CBR R22, 0xF0
+	OR R22, R27 ;Decrementar decenas de hora
+	JMP SAL
+
+UDD3:
+	CLR R22
+	LDI R27, 0X23
+	OR R22, R27 ;Reiniciar valores a 23
+	JMP SAL
+
+SET_FECHA:
+	IN R16, PINC ;ver si incrementamos, decrementamos o cambiamos de display
+	SBRS R16, 1
+	JMP CAMBIA_DF
+	SBRS R16, 2
+	JMP INC_FECHA
+	SBRS R16, 3
+	JMP DEC_FECHA
+	JMP SAL
+	
+CAMBIA_DF:
+	CPI R26, 0b0000_0001 ;cambiar el display a modificar para la fecha
+	BREQ OVERDF
+	INC R26
+	JMP SAL
+	
+OVERDF:
+	LDI R26, 0  ;regresar al primer display de fecha
+	JMP SAL
+
+INC_FECHA:
+	SBRS R26, 0 ; verificar que display estamos editando
+	JMP IMES
+	JMP IDIA
+	JMP SAL
+
+IMES:
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 2
+	BREQ IFEB ;VERIFICAR SI VAMOS A INCREMENTAR FEBRERO
+	CPI R27, 1 
+	BREQ IENE ;Verificar si vamos a incrementar enero
+	CPI R27, 9
+	BREQ ISEP ;verificar si incrementamos septiembre
+	CPI R27, 6 
+	BREQ INCUM ;verificar si incrementamos meses de 30 dias
+	CPI R27, 4 
+	BREQ INCUM ;verificar si incrementamos meses de 30 dias
+	CPI R27, 7
+	BREQ INCUM ;verificar si incrementamos JULIO
+	JMP ITREINTA1 ;verificar si incrementamos meses de 31 dias
+
+IFEB:
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ IDIC ;Asegurarnos que no sea diciembre
+
+	JMP INCUM ;Incrementar unidad de mes
+
+IENE:
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ INCUM ;Asegurarnos que no sea noviembre
+
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3
+	BREQ PON28 ;ver si hay que poner 28 en dias
+	JMP INCUM ;Incrementar unidad de mes
+
+ISEP:
+	LDI R23, 0x10 ;Poner el mes en 10
+	JMP SAL
+
+ITREINTA1:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3
+	BREQ ITREINTA11 ;Ir a verificar si ya llegamos a 31 dias
+	JMP INCUM ;Incrementar unidad de mes
+
+ITREINTA11:
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ PON30 ;Poner 30 en los dias
+	JMP INCUM ;Incrementar unidad de mes
+
+PON30:
+	LDI R24, 0x30 ;30 3n dias
+	JMP INCUM ;Incrementar unidad de mes
+
+PON28:
+	LDI R24, 0x28 ;28 en dias
+	JMP INCUM ;Incrementar unidad de mes
+	
+INCUM:
+	MOV R27, R23
+	CBR R27, 0xF0
+	INC R27 ;Incrementar unidad de mes
+	CBR R23, 0x0F
+	OR R23, R27
+
+	JMP SAL
+
+IDIC:
+	LDI R23, 0x01  ;Reiniciar los meses
+	JMP SAL
+
+IDIA:
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 2 ;Verificar si estamos en febrero segun unidades
+	BREQ IFebrero
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 1 ;Verificar si estamos en noviembre segun decenas
+	BREQ INoviembre
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 6 ;Verificar si estamos en JUNIO segun decenas
+	BREQ ITREINT
+	CPI R27, 4 ;Verificar si estamos en ABRIL segun decenas
+	BREQ ITREINT
+	CPI R27, 9 ;Verificar si estamos en septiembre segun unidades
+	BREQ ITREINT ;Subrutina si estamos en mes de 30 dias
+	JMP ITREINT1 ;Ir a incrementar los meses de 31 dias
+
+IFebrero:
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ ITREINT1 ;Verificar si estamos en diciembre segun decenas
+	
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 2
+	BREQ IODF ;Saltar a overflow definitivo para febrero
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 9
+	BREQ IOP ;Saltar a Overflow parcial para febrero
+	JMP INCNI ;ir a incrementar la unidad de dia
+
+INoviembre:
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 0
+	BREQ ITREINT1 ;Verificar si estamos en octubre segun unidades
+
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3 ;Saltar a nuevo mes para noviembre
+	BREQ INM ;ir a incrementar la unidad de dia
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 9
+	BREQ IOP ;Saltar a Overflow parcial para noviembre
+	JMP INCNI ;ir a incrementar la unidad de dia
+
+IODF:
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 8
+	BREQ INM ;Nuevo mes
+
+	JMP INCNI ;ir a incrementar la unidad de dia
+
+ITREINT:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3 ;Saltar a nuevo mes para treinta 
+	BREQ INM ;Resetear dia para treinta dias
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 9
+	BREQ IOP ;Saltar a Overflow parcial para noviembre
+	JMP INCNI ;ir a incrementar la unidad de dia
+	
+ITREINT1:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3 
+	BREQ IOT1 ;Saltar a over total para treinta y 1
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 9
+	BREQ IOP ;Saltar a Overflow parcial para noviembre
+	JMP INCNI ;ir a incrementar la unidad de dia
+
+IOP:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	
+	INC R27 ;Incrementar decena de dia
+	SWAP R27
+	CLR R24 ;limpiar unidad de dia
+	OR R24, R27
+	JMP SAL
+
+IOT1:
+	MOV R27, R24 ; 
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ INM ;Ir a Nuevo mes para 31
+	JMP INCNI ;ir a incrementar la unidad de dia
+
+INM:
+	LDI R24, 0x01 ;Unidad de dia en 1 y limpiar decena de dia
+	JMP SAL
+
+INCNI:
+	MOV R27, R24
+	CBR R27, 0xF0
+	INC R27 ;Incrementar la unidad de dia
+	CBR R24, 0x0F
+	OR R24, R27
+	JMP SAL
+
+DEC_FECHA:
+	SBRS R26, 0 ; verificar que display estamos editando
+	JMP DMES
+	JMP DDIA
+	JMP SAL
+
+DMES:
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ DENE ;VERIFICAR SI VAMOS A decrementar enero
+	CPI R27, 3 
+	BREQ DMAR ;Verificar si vamos a decrementar marzo
+	CPI R27, 0
+	BREQ DOCT ;verificar si decremnetamos octubre
+	CPI R27, 8 
+	BREQ DUM ;verificar si decrementamos meses de agosto dias
+	CPI R27, 4 
+	BREQ DUM ;verificar si decrementamos meses de 30 dias
+	CPI R27, 6
+	BREQ DUM ;verificar si decrementamos meses de 30 dias
+	CPI R27, 9
+	BREQ DUM ;verificar si decrementamos meses de 30 dias
+	JMP DTREINTA1 ;verificar si decrementamos meses de 31 dias
+
+
+DENE:
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ DUM ;Asegurarnos que no sea noviembre
+	LDI R23, 0x12
+	JMP SAL
+
+DMAR:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3
+	BREQ PONER28;ver si hay que poner 28 en dias
+	JMP DUM ;Decrementar unidad de mes
+
+DOCT:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3
+	BREQ DDOCT ;ver si hay que poner 30 en dias
+	JMP DDM ;Decrementar decena de mes
+
+DDOCT:
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ DDOTC30 ;Verificar si son 30 o si son 31
+	JMP DDM ;Decrementar decena de mes
+
+DDOTC30:
+	LDI R24, 0x30 ;POner dias en 30
+	JMP DDM ;Decrementar decena de mes
+
+DTREINTA1:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3
+	BREQ DTREINTA11 ;Verificar si ya tenemos a 31 los dias
+	JMP DUM
+
+DTREINTA11:
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ PONER30 ;ir a poner en 30 los dias del mes
+	JMP DUM ;Decrementar unidad de mes
+
+PONER30:
+	LDI R24, 0x30 ;Poner 30 en los dias
+	JMP DUM
+
+PONER28:
+	LDI R24, 0x28 ;Poner 28 en los dias
+	JMP DUM
+	
+DUM:
+	MOV R27, R23
+	CBR R27, 0xF0
+	DEC R27 ;Decrementar la unidad de mes
+	CBR R23, 0x0F
+	OR R23, R27
+
+	JMP SAL
+
+DDM:
+	LDI R23, 0x09 ;Decrementar la decena de mes
+	JMP SAL	
+
+DDIA:
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 2 ;Verificar si estamos en febrero segun unidades
+	BREQ DFebrero
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 1 ;Verificar si estamos en noviembre segun decenas
+	BREQ DNoviembre
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 6 ;Verificar si estamos en JUNIO segun decenas
+	BREQ DTREINT
+	CPI R27, 4 ;Verificar si estamos en ABRIL segun decenas
+	BREQ DTREINT
+	CPI R27, 9 ;Verificar si estamos en septiembre segun unidades
+	BREQ DTREINT
+	JMP DTREINT1
+
+DFebrero:
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ DTREINT1 ;Verificar si estamos en diciembre segun decenas
+	
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 0
+	BREQ UDF ;Saltar a underflow definitivo para febrero
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 0
+	BREQ UP ;Saltar a underflow parcial para febrero
+	JMP DUD ;Decrementar unidad de dias
+
+DNoviembre:
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 0
+	BREQ DTREINT1 ;Verificar si estamos en octubre segun unidades
+
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 0
+	BREQ UD30 ;Saltar a underflow definitivo
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 0
+	BREQ UP ;Saltar a underflow parcial 
+	JMP DUD ;Decrementar unidad de dias
+
+UDF:
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ UDFF ;Saltar A UNDERFLOW FINAL para febrero
+	JMP DUD
+
+UDFF:
+	LDI R24, 0x28
+	JMP SAL
+
+DTREINT:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 0
+	BREQ UD30 ;Saltar a underflow definitivo
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 0
+	BREQ UP ;Saltar a underflow parcial 
+	JMP DUD ;Decrementar unidad de dias
+	
+DTREINT1:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 0
+	BREQ UD31 ;Saltar a underflow definitivo
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 0
+	BREQ UP ;Saltar a underflow parcial 
+	JMP DUD ;Decrementar unidad de dias
+
+
+UP:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	DEC R27 ;Decrementar decenas de dias
+	SWAP R27
+	LDI R24, 0x09 ;POner unidades en 9
+	OR R24, R27
+	JMP SAL
+
+UD30:
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ UD30F ;Saltar a underflow final de 30 dias
+	JMP DUD
+
+UD30F:
+	LDI R24, 0x30 ;Poner el d1a en 30
+	JMP SAL
+
+UD31:
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ UD31F ;Saltar a underflow final de 31 dias
+	JMP DUD
+
+UD31F:
+	LDI R24, 0x31 ;Poner el dia en 31
+	JMP SAL
+
+
+DUD:
+	MOV R27, R24
+	CBR R27, 0xF0
+	DEC R27 ;Decrementar decenas de dias
+	CBR R24, 0x0F ;POner unidades en 9
+	OR R24, R27
+	JMP SAL
+
+SET_ALARM:
+	IN R16, PINC ;ver si incrementamos, decrementamos o cambiamos de display
+	SBRS R16, 1
+	JMP CAMBIADISP
+	SBRS R16, 2
+	JMP INC_ALARM
+	SBRS R16, 3
+	JMP DEC_ALARM
+	JMP SAL
+
+CAMBIADISP:
+	CPI R26, 0b0000_0010 ;cambiar el display a modificar
+	BREQ OVERDISP
+	INC R26
+	JMP SAL
+	
+OVERDISP:
+	LDI R26, 0  ;regresar al primer display
+	JMP SAL
+
+INC_ALARM:
+	CPI R26, 0b0000_0000 ; verificar que display estamos editando
+	BREQ IA1
+	CPI R26, 0b0000_0001
+	BREQ IA2
+	CPI R26, 0b0000_0010
+	BREQ IA3
+	JMP SAL
+
+IA1:
+	MOV R27, R29
+	CBR R27, 0xF0
+	CPI R27, 4 ;Ver si si tenemos 4
+	BREQ I24A
+	JMP IA1N
+
+I24A:
+	MOV R27, R29
+	swap r27
+	CBR R27, 0xF0
+	CPI R27, 2 ;Ver si si tenemos 4
+	BREQ APAGA_ALARM
+	JMP IA1N
+
+APAGA_ALARM:
+	CLR R28 
+	JMP SAL
+
+
+IA1N:
+	MOV R27, R28
+	CBR R27, 0xF0
+	CPI R27, 9 ;verificar si la unidad de minuto llego a 9
+	BREQ OA1 ; Ir a overflow de la unidad de minuto 1
+	INC R27
+	CBR R28, 0x0F
+	OR R28, R27
+	JMP SAL	
+
+OA1:
+	CBR R28, 0x0F ; setearla unidad de minuto en cero
+	JMP SAL
+
+
+IA2:
+	MOV R27, R29
+	CBR R27, 0xF0
+	CPI R27, 4 ;Ver si si tenemos 4
+	BREQ I24A
+	JMP IA1N2
+
+I24A2:
+	MOV R27, R29
+	swap r27
+	CBR R27, 0xF0
+	CPI R27, 2 ;Ver si si tenemos 4
+	BREQ APAGA_ALARM2
+	JMP IA1N2
+
+APAGA_ALARM2:
+	CLR R28 
+	JMP SAL
+
+
+IA1N2:
+	MOV R27, R28 ;Verificar si la decena de minuto llego a 5
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 5
+	BREQ OA2 ;Ir a overflow de decenas de minuto
+	INC R27
+	SWAP R27
+	CBR R28, 0xF0
+	OR R28, R27
+	JMP SAL
+
+OA2:
+	CBR R28, 0xF0
+	JMP SAL
+
+IA3:
+	MOV R27, R29
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 2 ;Verificar si la decena de horas llego a 2
+	BREQ CA3 ;Saltar a cuidado con llegar a 3 en las unidades
+	MOV R27, R29
+	CBR R27, 0xF0
+	CPI R27, 9 ;Verificar si la unidad de horas llego a 9
+	BREQ OA3 ;Ir a overflow antes del 20
+	INC R27
+	CBR R29, 0x0F
+	OR R29, R27
+	JMP SAL
+
+CA3:
+	MOV R27, R29
+	CBR R27, 0xF0
+	CPI R27, 4 ;Verificar si la unidad de horas es 4
+	BREQ OOA3 ;Saltar a overflow de horas
+	INC R27
+	CBR R29, 0x0F
+	OR R29, R27
+	JMP SAL
+
+OA3:
+	CBR R29, 0x0F ;Poner unidades de hora en cero
+	MOV R27, R29 ;Incrementar decenas de hora en
+	SWAP R27
+	INC R27
+	SWAP R27
+	CBR R29, 0xF0
+	OR R29, R27
+	JMP SAL
+
+OOA3:
+	CLR R28
+	CLR R29 ;Poner horas en cero
+	JMP SAL
+
+DEC_ALARM:
+	CPI R26, 0b0000_0000 ; verificar que display estamos editando
+	BREQ DA1
+	CPI R26, 0b0000_0001
+	BREQ DA2
+	CPI R26, 0b0000_0010
+	BREQ DA3
+	JMP SAL
+
+DA1:
+	MOV R27, R29
+	CBR R27, 0xF0
+	CPI R27, 4 ;Ver si si tenemos 4
+	BREQ D24A
+	JMP DA1N
+
+D24A:
+	MOV R27, R29
+	swap r27
+	CBR R27, 0xF0
+	CPI R27, 2 ;Ver si si tenemos 4
+	BREQ APAGA_ALARMD
+	JMP DA1N
+
+APAGA_ALARMD:
+	CLR R28 
+	JMP SAL
+
+DA1N:
+	MOV R27, R28
+	CBR R27, 0XF0
+	CPI R27, 0 ;comparar unidades de minuto con cero
+	BREQ UA1 ;Ir a underflow de unidades de minuto
+	DEC R27
+	CBR R28, 0x0F
+	OR R28, R27
+	JMP SAL	
+
+UA1:
+	LDI R27, 9 ;Poner unidades de minuto en 9
+	CBR R28, 0x0F
+	OR R28, R27
+	JMP SAL
+
+DA2:
+	MOV R27, R29
+	CBR R27, 0xF0
+	CPI R27, 4 ;Ver si si tenemos 4
+	BREQ D24A2
+	JMP DA1N2
+
+D24A2:
+	MOV R27, R29
+	swap r27
+	CBR R27, 0xF0
+	CPI R27, 2 ;Ver si si tenemos 4
+	BREQ APAGA_ALARMD2
+	JMP DA1N2
+
+DA1N2:
+	MOV R27, R28
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 0 ;Comparar decenas de minuto con 0
+	BREQ UA2 ;Underflow de decenas de minuto
+	DEC R27
+	SWAP R27
+	CBR R28, 0xF0
+	OR R28, R27
+	JMP SAL
+
+UA2:
+	LDI R27, 5 ; poner decenas de minuto en 5
+	SWAP R27
+	CBR R28, 0xF0
+	OR R28, R27
+	JMP SAL
+
+DA3:
+	MOV R27, R29 
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 0 ;Verificar si la decena de hora es 0
+	BREQ SA3 ;Saltar a cuidado con underflow total
+	MOV R27, R29
+	CBR R27, 0xF0
+	CPI R27, 0 ;Verificar si la unidad de hora es 0
+	BREQ UA3 ;Saltar a underflow parcial
+	DEC R27
+	CBR R29, 0x0F
+	OR R29, R27
+	JMP SAL
+
+SA3:
+	MOV R27, R29
+	CBR R27, 0xF0
+	CPI R27, 0 ;Verificar si la unidad de hora es cero
+	BREQ UDA3 ;ir a underflow total
+	DEC R27
+	CBR R29, 0x0F
+	OR R29, R27
+	JMP SAL
+
+UA3:
+	LDI R27, 9
+	CBR R29, 0x0F
+	OR R29, R27 ;Poner unidades de hora en 9
+	MOV R27, R29
+	CBR R27, 0x0F
+	SWAP R27
+	DEC R27
+	SWAP R27
+	CBR R29, 0xF0
+	OR R29, R27 ;Decrementar decenas de hora
+	JMP SAL
+
+UDA3:
+	LDI R29, 0x24 ;Reiniciar valores a 23
+	CLR R28
+	JMP SAL
+
+APAGA_ALARMD2:
+	CLR R28 
+	JMP SAL
+
+OFFALARM:
+	IN R16, PINC
+	SBRC R16, 0 ; Saltar la siguiente instruccion si se presiono el boton de modo
+	JMP SAL
+	LDI R29, 0x24
+	CLR R28
+	CBI PORTC, PC4
+	JMP SAL
+	
+SAL:
+	CPI R25, 0b0000_0000
+	BREQ SALH ;Actualizar valores de hora
+	CPI R25, 0b0000_0001
+	BREQ SALF ; Actualizar valores de fecha
+	CPI R25, 0b0000_0010
+	BREQ SALH
+	CPI R25, 0b0000_0011
+	BREQ SALF
+	CPI R25, 0b0000_0100
+	BREQ SALA
+
+SALF:
+	MOV R27, R23
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R17, Z ; cargar el valor de la tabla
+
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R18, Z ; cargar el valor de la tablaa
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R19, Z ; cargar el valor de la tabla
+
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R20, Z ; cargar el valor de la tablaa
+	
+	SBI PCIFR, PCIF1
+
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI
+
+SALH:
+	MOV R27, R21
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R17, Z ; cargar el valor de la tabla
+
+	MOV R27, R21
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R18, Z ; cargar el valor de la tablaa
+
+	MOV R27, R22
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R19, Z ; cargar el valor de la tabla
+
+	MOV R27, R22
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R20, Z ; cargar el valor de la tablaa
+
+	SBI PCIFR, PCIF1
+
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI
+
+
+SALA:
+	MOV R27, R28
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R17, Z ; cargar el valor de la tabla
+
+	MOV R27, R28
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R18, Z ; cargar el valor de la tablaa
+
+	MOV R27, R29
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R19, Z ; cargar el valor de la tabla
+
+	MOV R27, R29
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R20, Z ; cargar el valor de la tablaa
+
+
+	SBI PCIFR, PCIF1
+
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI
+
+;--TIMER0--------------------------------------------------------------------------------------------------------------
+
+INT_TMR0:
+	PUSH R16
+	IN R16, SREG
+	PUSH R16
+
+	LDI R16, 12  ; aprox 500ms
+	OUT TCNT0, R16
+
+DosPuntos:
+	SBRC R17, 7
+	JMP Apaga
+	SBR R17, 128
+	SBR R18, 128
+	JMP SALIR
+
+Apaga:
+	CBR R17, 128
+	CBR R18, 128
+	JMP SALIR
+
+SALIR:
+	SBI TIFR0, TOV0
+	
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI
+
+;--TIMER1-----------------------------------------------------------------------------------------------------------
+
+INT_TMR1:
+	PUSH R16
+	IN R16, SREG
+	PUSH R16
+
+	LDI R16, 0x8F  ; aprox 60s
+	STS TCNT1L, R16
+	LDI R16, 0x8D  ; aprox 60s
+	STS TCNT1H, R16
+
+	JMP Minutos
+
+Minutos:
+	MOV R27, R21
+	CBR R27, 0xF0
+	CPI R27, 9 ; Verificar si hay overflow
+	BRNE SinOver ; Ir a la subrutina sin overflow
+
+	MOV R27, R21
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 5 ; Verificar si hay overflow
+	BREQ Horas ; Ir a la subrutina de horas overflow
+
+	INC R27 ; Incrementar la decena de minutos y limpiar la unidad
+	SWAP R27
+	CBR R21, 0xF0
+	OR R21, R27
+	CBR R21, 0x0F
+
+	JMP ALARMA
+
+SinOver:
+	INC R27 ;Incrementar la unidad de minutos
+	CBR R21, 0x0F
+	OR R21, R27
+	JMP ALARMA
+
+Horas:
+	CLR R21
+
+	MOV R27, R22
+	CBR R27, 0xF0
+	CPI R27, 9 ; Verificar si hay overflow
+	BREQ Over
+	
+	MOV R27, R22
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 2
+	BREQ OVER_HORA ; verificar si llegamos a 20 horas
+
+	MOV R27, R22
+	CBR R27, 0xF0
+	INC R27 ;Incrementar unidad de minutos
+	CBR R22, 0x0F
+	OR R22, R27
+	JMP ALARMA
+
+Over:
+	MOV R27, R22
+	SWAP R27
+	INC R27
+	SWAP R27
+	CLR R22 ;Overflow parcial de horas 
+	OR R22, R27
+	JMP ALARMA
+
+OVER_HORA:
+	MOV R27, R22
+	CBR R27, 0xF0
+	CPI R27, 3 ; Verificar si hay overflow
+	BREQ DIA
+
+	INC R27 ;incrementar unidad de minutos
+	CBR R22, 0x0F
+	OR R22, R27
+
+	JMP ALARMA
+
+DIA:
+	CLR R21
+	CLR R22 ; Limpiar horas
+
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 2 ;Verificar si estamos en febrero segun unidades
+	BREQ Febrero
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 1 ;Verificar si estamos en noviembre segun decenas
+	BREQ Noviembre
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 6 ;Verificar si estamos en JUNIO segun decenas
+	BREQ TREINTA
+	CPI R27, 4 ;Verificar si estamos en ABRIL segun decenas
+	BREQ TREINTA
+	CPI R27, 9 ;Verificar si estamos en septiembre segun unidades
+	BREQ TREINTA
+	JMP TREINTA1
+
+Febrero:
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ TREINTA1 ;Verificar si estamos en diciembre segun decenas
+	
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 2
+	BREQ ODF ;Saltar a overflow definitivo para febrero
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 9
+	BREQ OP ;Saltar a Overflow parcial para febrero
+	JMP INCN
+
+Noviembre:
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 0
+	BREQ TREINTA1 ;Verificar si estamos en octubre segun unidades
+
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3 ;Saltar a nuevo mes para noviembre
+	BREQ NM
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 9
+	BREQ OP ;Saltar a Overflow parcial para noviembre
+	JMP INCN
+
+ODF:
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 8
+	BREQ NM ;Nuevo mes
+
+	JMP INCN
+
+TREINTA:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3 ;Saltar a nuevo mes para treinta 
+	BREQ NM
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 9
+	BREQ OP ;Saltar a Overflow parcial para noviembre
+	JMP INCN
+	
+TREINTA1:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 3 ;Saltar a over total para treinta y 1
+	BREQ OT1
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	CPI R27, 9
+	BREQ OP ;Saltar a Overflow parcial para noviembre
+	JMP INCN
+
+OP:
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	
+	INC R27 ;Incrementar decena de dia
+	SWAP R27
+	CLR R24 ;limpiar unidad de dia
+	OR R24, R27
+	JMP ALARMA
+
+OT1:
+	MOV R27, R24 ; 
+	CBR R27, 0xF0
+	CPI R27, 1
+	BREQ NM ;Ir a Nuevo mes para 31
+	JMP INCN
+
+NM:
+	LDI R24, 0x01 ;Unidad de dia en 1 y limpiar decena de dia
+	MOV R27, R23
+	CBR R27, 0xF0
+	CPI R27, 9 ;Ver si es septiembre
+	BREQ PONER1
+	CPI R27, 2 ;Ver si es DICIEMBRE
+	BREQ Diciembre
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 1 ;Ver si es oct o nov
+	BREQ SUMA1
+
+	INC R23 ;Incrementar mes
+	JMP ALARMA
+
+PONER1:
+	LDI R23, 0X10 ;Poner el mes en 10
+	JMP ALARMA
+
+Diciembre:
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	CPI R27, 1 ;Veificar si es diciembre
+	BREQ REINICIOM
+	INC R23 ;incrementar febrero
+	JMP ALARMA
+
+REINICIOM:
+	LDI R23, 0X01 ;Reiniciar meses
+	JMP ALARMA
+
+SUMA1:
+	MOV R27, R23
+	CBR R27, 0xF0
+	INC R27  ;incrementar unidad de mes
+	CBR R23, 0x0F
+	OR R23, R27
+	JMP ALARMA
+
+INCN:
+	MOV R27, R24
+	CBR R27, 0xF0
+	INC R27 ;Incrementar unidad de dia
+	CBR R24, 0x0F
+	OR R24, R27
+	JMP ALARMA
+
+
+ALARMA:
+	MOV R27, R28
+	MOV R16, R21
+	CPSE R27, R16
+	JMP BAI
+	MOV R27, R29
+	MOV R16, R22
+	CP R27, R16
+	BREQ BAIA
+	JMP BAI
+
+
+BAIA:
+	IN R27, PINC
+	SBRS R27, 4
+	SBI PORTC, PC4
+	JMP BAI
+
+BAI:
+	CPI R25, 0b0000_0000
+	BREQ BAIH ;Actualizar los valores de la hora
+	CPI R25, 0b0000_0001
+	BREQ BAIF ;Actualizar los valores de la fecha
+	CPI R25, 0b0000_0100
+	BREQ BAI_A
+
+BAIF:
+	MOV R27, R23
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R17, Z ; cargar el valor de la tabla
+
+	MOV R27, R23
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R18, Z ; cargar el valor de la tablaa
+
+	MOV R27, R24
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R19, Z ; cargar el valor de la tabla
+
+	MOV R27, R24
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R20, Z ; cargar el valor de la tablaa
+		
+	SBI TIFR1, TOV1		;Limpiar bandera 
+	
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI
+	
+BAIH:	
+	MOV R27, R21
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R17, Z ; cargar el valor de la tabla
+
+	MOV R27, R21
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R18, Z ; cargar el valor de la tablaa
+
+	MOV R27, R22
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R19, Z ; cargar el valor de la tabla
+		
+	SBI TIFR1, TOV1		;Limpiar bandera 
+	
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI
+
+BAI_A:
+	MOV R27, R28
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R17, Z ; cargar el valor de la tabla
+
+	MOV R27, R28
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R18, Z ; cargar el valor de la tablaa
+
+	MOV R27, R29
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R19, Z ; cargar el valor de la tabla
+
+	MOV R27, R29
+	SWAP R27
+	CBR R27, 0xF0
+	LDI ZL, LOW (TABLASEG << 1)
+	LDI ZH, HIGH (TABLASEG << 1)
+	ADD ZL, R27 ; Regresar el puntero a la posicion cero
+	LPM R20, Z ; cargar el valor de la tablaa
+
+
+	SBI TIFR1, TOV1		;Limpiar bandera 
+
+	POP R16
+	OUT SREG, R16
+	POP R16
+	RETI	
+
+;********************************************************************************************************************************************
+;SUBRUTINAS
+;********************************************************************************************************************************************	
+
+Timer0:
+	LDI R16, (1 << CS02) | (1 << CS00) ; Prescaler 1024
+	OUT TCCR0B, R16
+
+	LDI R16, 12  ; aprox 500ms
+	OUT TCNT0, R16
+
+	LDI R16, (1<<TOIE0)
+	STS TIMSK0, R16
+
+	RET
+
+Timer1:
+	LDI R16, (1 << CS12) | (1 << CS10) ; Prescaler 1024
+	STS TCCR1B, R16
+
+	LDI R16, 0x8F  ; aprox 60s
+	STS TCNT1L, R16
+	LDI R16, 0x8D  ; aprox 60s
+	STS TCNT1H, R16
+
+	LDI R16, (1<<TOIE1)
+	STS TIMSK1, R16
+
+	RET
+
+DEL:
+	LDI R16, 150
+
+LOOP_DELAY:
+	DEC R16
+	BRNE LOOP_DELAY
+	RET
